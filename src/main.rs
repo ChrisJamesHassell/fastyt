@@ -665,9 +665,12 @@ impl App {
 }
 
 impl eframe::App for App {
+    fn logic(&mut self, ctx: &egui::Context, _frame: &mut eframe::Frame) {
+        self.poll(ctx);
+    }
+
     fn ui(&mut self, ui: &mut Ui, _frame: &mut eframe::Frame) {
         let ctx = ui.ctx().clone();
-        self.poll(&ctx);
         let search_focused = ctx.memory(|m| m.has_focus(search_id()));
         self.handle_keys(&ctx, search_focused);
 
