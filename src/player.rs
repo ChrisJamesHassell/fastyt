@@ -19,6 +19,8 @@ pub struct Status {
     pub duration: Option<f64>,
     pub paused: bool,
     pub volume: f64,
+    /// mpv paused itself to wait for more data.
+    pub buffering: bool,
 }
 
 pub enum Control {
@@ -40,14 +42,23 @@ impl Player {
     }
 
     pub fn play_audio(&mut self, tools: &Tools, url: &str, ctx: &egui::Context) -> Result<(), String> {
+        self.start(tools, url, ctx, &[])
+    }
+
+    /// Plays with audio output disabled, for `--diagnose`: everything else matches real playback.
+    pub fn play_silently(&mut self, tools: &Tools, url: &str, ctx: &egui::Context) -> Result<(), String> {
+        self.start(tools, url, ctx, &["--ao=null"])
+    }
+
+    fn start(&mut self, tools: &Tools, url: &str, ctx: &egui::Context, extra: &[&str]) -> Result<(), String> {
         self.stop();
         let mpv = tools.mpv.as_ref().ok_or("mpv isn't installed")?;
         let session = NEXT_SESSION.fetch_add(1, Ordering::Relaxed);
         let pipe = pipe_path(session);
 
         let mut cmd = Command::new(mpv);
-        cmd.args(mpv_args(url, &pipe, self.volume, tools.ytdl_hook_args()));
-        yt::hide_console(&mut cmd);
+        cmd.args(mpv_args(url, &pipe, self.volume, tools.ytdl_hook_args())).args(extra);
+        yt::prepare_child(&mut cmd);
         let child = cmd.spawn().map_err(|e| format!("Couldn't start mpv: {e}"))?;
 
         let status = Arc::new(Mutex::new(Status { volume: self.volume, ..Default::default() }));
@@ -109,11 +120,29 @@ impl Drop for Player {
     }
 }
 
+/// Network settings for flaky or filtered connections (e.g. corporate proxies): drop a stalled
+/// connection after 10 s instead of mpv's default 60 s, reconnect automatically, and refill a few
+/// seconds of buffer after a stall so playback doesn't stutter on and off.
+const NETWORK_ARGS: [&str; 4] = [
+    "--network-timeout=10",
+    "--stream-lavf-o=reconnect=1,reconnect_streamed=1,reconnect_on_network_error=1,reconnect_delay_max=5",
+    "--cache=yes",
+    "--cache-pause-wait=3",
+];
+
 fn mpv_args(url: &str, pipe: &str, volume: f64, ytdl_hook: Option<String>) -> Vec<String> {
-    let mut args: Vec<String> =
-        [url, "--no-video", "--force-window=no", "--idle=no", "--no-terminal", "--ytdl-format=bestaudio/best"]
-            .map(str::to_owned)
-            .into();
+    let mut args: Vec<String> = [
+        url,
+        "--no-video",
+        "--sid=no",
+        "--force-window=no",
+        "--idle=no",
+        "--no-terminal",
+        "--ytdl-format=bestaudio/best",
+    ]
+    .map(str::to_owned)
+    .into();
+    args.extend(NETWORK_ARGS.map(str::to_owned));
     args.push(format!("--input-ipc-server={pipe}"));
     args.push(format!("--volume={volume}"));
     args.extend(ytdl_hook);
@@ -171,6 +200,7 @@ fn run_ipc(path: &str, rx: mpsc::Receiver<Control>, status: Arc<Mutex<Status>>, 
                 duration: conn.request(json!(["get_property", "duration"]))?.as_f64(),
                 paused: conn.request(json!(["get_property", "pause"]))?.as_bool().unwrap_or(false),
                 volume: conn.request(json!(["get_property", "volume"]))?.as_f64().unwrap_or(80.0),
+                buffering: conn.request(json!(["get_property", "paused-for-cache"]))?.as_bool().unwrap_or(false),
             })
         })();
         match polled {
@@ -286,10 +316,15 @@ mod tests {
             [
                 "https://youtu.be/x",
                 "--no-video",
+                "--sid=no",
                 "--force-window=no",
                 "--idle=no",
                 "--no-terminal",
                 "--ytdl-format=bestaudio/best",
+                "--network-timeout=10",
+                "--stream-lavf-o=reconnect=1,reconnect_streamed=1,reconnect_on_network_error=1,reconnect_delay_max=5",
+                "--cache=yes",
+                "--cache-pause-wait=3",
                 "--input-ipc-server=PIPE",
                 "--volume=80",
                 "--script-opts=ytdl_hook-ytdl_path=Y",

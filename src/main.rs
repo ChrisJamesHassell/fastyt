@@ -1,8 +1,10 @@
 #![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
 
+mod diagnose;
 mod icon;
 mod player;
 mod theme;
+mod thumbs;
 mod yt;
 
 use eframe::egui::{
@@ -23,6 +25,11 @@ const PLAYER_BAR_H: f32 = 92.0;
 const RESTART_INSTEAD_OF_PREV: f64 = 3.0;
 
 fn main() -> eframe::Result {
+    let args: Vec<String> = std::env::args().collect();
+    if args.get(1).map(String::as_str) == Some("--diagnose") {
+        print_diagnostics(args.get(2).map(String::as_str));
+        return Ok(());
+    }
     std::thread::spawn(yt::warm_up);
     let options = eframe::NativeOptions {
         viewport: egui::ViewportBuilder::default()
@@ -36,6 +43,7 @@ fn main() -> eframe::Result {
         "fast.yt",
         options,
         Box::new(|cc| {
+            cc.egui_ctx.add_bytes_loader(Arc::new(thumbs::ThumbnailLoader::default()));
             egui_extras::install_image_loaders(&cc.egui_ctx);
             theme::install(&cc.egui_ctx);
             Ok(Box::new(App::new()))
@@ -567,7 +575,14 @@ impl App {
             }
         }
         let small = FontId::proportional(12.0);
-        let left_label = shown.map(fmt_time).unwrap_or_else(|| "Loading".into());
+        let left_label = match shown {
+            Some(_) if status.buffering => "Buffering".into(),
+            Some(pos) => fmt_time(pos),
+            None => "Loading".into(),
+        };
+        if status.buffering && shown.is_some() {
+            paint_sweep(ui, track, track.center().y);
+        }
         let right_label = match (duration, shown) {
             (Some(d), _) => fmt_time(d),
             (None, Some(_)) => "LIVE".into(),
@@ -955,6 +970,35 @@ fn lerp_color(a: Color32, b: Color32, t: f32) -> Color32 {
 fn ease_out(t: f32) -> f32 {
     1.0 - (1.0 - t).powi(3)
 }
+
+fn print_diagnostics(target: Option<&str>) {
+    attach_parent_console();
+    println!("Running fast.yt diagnostics (takes about a minute; nothing will play out loud)...");
+    let report = diagnose::run(target);
+    println!("{report}");
+    let saved = std::env::temp_dir().join("fastyt-diagnostics.txt");
+    if std::fs::write(&saved, &report).is_ok() {
+        println!("Saved to {}", saved.display());
+    }
+}
+
+/// Release builds on Windows are GUI apps with no console; attach to the terminal that launched
+/// `fastyt --diagnose` so the report is visible there.
+#[cfg(windows)]
+fn attach_parent_console() {
+    #[link(name = "kernel32")]
+    unsafe extern "system" {
+        fn AttachConsole(process_id: u32) -> i32;
+    }
+    const ATTACH_PARENT_PROCESS: u32 = u32::MAX;
+    // SAFETY: AttachConsole takes no pointers; failure (e.g. no parent console) is harmless.
+    unsafe {
+        AttachConsole(ATTACH_PARENT_PROCESS);
+    }
+}
+
+#[cfg(not(windows))]
+fn attach_parent_console() {}
 
 #[cfg(test)]
 mod tests {

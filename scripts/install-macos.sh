@@ -10,9 +10,12 @@ if ! command -v cargo >/dev/null; then
 fi
 for tool in mpv yt-dlp; do
     if ! command -v "$tool" >/dev/null; then
-        echo "warning: $tool not found. Install with: brew install mpv yt-dlp" >&2
+        echo "warning: $tool not found. Install with: brew install mpv yt-dlp deno" >&2
     fi
 done
+if ! command -v deno >/dev/null; then
+    echo "note: deno not found. It is optional but helps yt-dlp avoid YouTube throttling: brew install deno" >&2
+fi
 
 cargo build --release
 

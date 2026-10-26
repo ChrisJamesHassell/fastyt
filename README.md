@@ -28,7 +28,7 @@ You need [Rust](https://rustup.rs), plus mpv and yt-dlp on your machine. The scr
 ### macOS
 
 ```bash
-brew install mpv yt-dlp
+brew install mpv yt-dlp deno
 git clone https://github.com/ChrisJamesHassell/fastyt.git
 cd fastyt
 ./scripts/install-macos.sh
@@ -39,7 +39,7 @@ This creates `~/Applications/fast.yt.app`. Open it from Spotlight by typing **fa
 ### Windows
 
 ```powershell
-winget install shinchiro.mpv yt-dlp.yt-dlp
+winget install shinchiro.mpv yt-dlp.yt-dlp DenoLand.Deno
 git clone https://github.com/ChrisJamesHassell/fastyt.git
 cd fastyt
 .\scripts\install-windows.ps1
@@ -73,7 +73,25 @@ Run `./scripts/uninstall-macos.sh` or `.\scripts\uninstall-windows.ps1`.
 - **Playback** runs mpv in the background with video disabled. fast.yt controls it over mpv's [JSON IPC](https://mpv.io/manual/stable/#json-ipc) (a named pipe on Windows, a Unix socket on macOS) for pause, seek and volume, and to detect when a track ends.
 - mpv uses yt-dlp to resolve the audio stream.
 
-If search or playback stops working, update yt-dlp first (`brew upgrade yt-dlp` or `winget upgrade yt-dlp.yt-dlp`). YouTube changes often and yt-dlp keeps up.
+[deno](https://deno.com) is optional but recommended: yt-dlp uses it to answer YouTube's download challenges, and without it YouTube may throttle playback.
+
+## Troubleshooting
+
+**Search or playback stopped working.** Update yt-dlp first (`brew upgrade yt-dlp` or `winget upgrade yt-dlp.yt-dlp`). YouTube changes often and yt-dlp keeps up.
+
+**Slow to start, buffering, or not working on a work network.** Run the built-in diagnostics. They check HTTPS, search, the stream lookup, download speed and a short silent playback, then print a report (also saved to your temp folder):
+
+```bash
+~/Applications/fast.yt.app/Contents/MacOS/fastyt --diagnose
+```
+
+```powershell
+& "$env:LOCALAPPDATA\Programs\fast.yt\fastyt.exe" --diagnose | Out-Host
+```
+
+Add a YouTube link at the end to test a specific video.
+
+**Corporate networks.** Some company networks (for example Cloudflare Zero Trust) inspect HTTPS traffic using a company certificate. fast.yt trusts your operating system's certificates, so it works as long as that certificate is installed system-wide, which IT normally does. Playback also recovers from dropped connections within about 10 seconds and shows **Buffering** while it waits for data.
 
 ## Development
 
